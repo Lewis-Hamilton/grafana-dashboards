@@ -39,7 +39,7 @@ attrMap = dict.fromList(pairs: [
 devMap = dict.fromList(pairs: [
   {key: "temp_c",         value: {col: "Temperature",         scale: 1.0, offset: 0.0}},
   {key: "power_on_hours", value: {col: "Power On Hours", scale: 1.0, offset: 0.0}},
-  {key: "health_ok",      value: {col: "Health OK",       scale: 1.0, offset: 0.0}}
+  {key: "health_ok",      value: {col: "Health",       scale: 1.0, offset: 0.0}}
 ])
 
 // smart_device TAG (column) name
@@ -86,3 +86,4 @@ devs = from(bucket: "disk_health")
 
 join(tables: {d: devs, a: attrs}, on: ["serial_no", "host"])
   |> group()
+  |> rename(fn: (column) => dict.get(dict: tagMap, key: column, default: column))
