@@ -5,6 +5,7 @@ import "dict"
 // field is whether the attribute is stored as a value or raw value
 // scale is the bytes multiplyer
 // offset is for percentages 
+// smart_attribute value 
 attrMap = dict.fromList(pairs: [
   // Life remaining (normalized `value`, 100 = new)
   {key: "SSD_Life_Left",           value: {col: "Life Remaining", field: "value",     scale: 1.0,  offset: 0.0}},
@@ -31,12 +32,30 @@ attrMap = dict.fromList(pairs: [
   {key: "SATA_CRC_Error_Count",    value: {col: "CRC Errors",       field: "raw_value", scale: 1.0, offset: 0.0}},
   {key: "CRC_Error_Count",         value: {col: "CRC Errors",       field: "raw_value", scale: 1.0, offset: 0.0}},
   {key: "Unsafe_Shutdown_Count",   value: {col: "Unsafe Shutdowns", field: "raw_value", scale: 1.0, offset: 0.0}},
-  {key: "Power_On_Hours",          value: {col: "Power On Hours",   field: "raw_value", scale: 1.0, offset: 0.0}},
   {key: "Power_Cycle_Count",       value: {col: "Power Cycles",     field: "raw_value", scale: 1.0, offset: 0.0}}
 ])
 
-unmapped = {col: "", field: "raw_value", scale: 1.0, offset: 0.0}
-lookup = (name) => dict.get(dict: attrMap, key: name, default: unmapped)
+// smart_device FIELD name
+devMap = dict.fromList(pairs: [
+  {key: "temp_c",         value: {col: "Temperature",         scale: 1.0, offset: 0.0}},
+  {key: "power_on_hours", value: {col: "Power On Hours", scale: 1.0, offset: 0.0}},
+  {key: "health_ok",      value: {col: "Health OK",       scale: 1.0, offset: 0.0}}
+])
+
+// smart_device TAG (column) name
+tagMap = dict.fromList(pairs: [
+  {key: "serial_no", value: "Serial Number"},
+  {key: "host",      value: "Host"},
+  {key: "device",    value: "Device"},
+  {key: "model",     value: "Model"},
+  {key: "capacity",  value: "Capacity"}
+])
+
+unmappedAttr = {col: "", field: "raw_value", scale: 1.0, offset: 0.0}
+lookup = (name) => dict.get(dict: attrMap, key: name, default: unmappedAttr)
+
+unmappedDev = {col: "", scale: 1.0, offset: 0.0}
+devLookup = (field) => dict.get(dict: devMap, key: field, default: unmappedDev)
 
 attrs = from(bucket: "disk_health")
   |> range(start: -30d)
@@ -54,11 +73,16 @@ attrs = from(bucket: "disk_health")
 
 devs = from(bucket: "disk_health")
   |> range(start: -30d)
-  |> filter(fn: (r) => r._measurement == "smart_device" and r._field == "temp_c")
-  |> group(columns: ["serial_no", "host"])
+  |> filter(fn: (r) => r._measurement == "smart_device")
+  |> filter(fn: (r) => devLookup(field: r._field).col != "")
+  |> group(columns: ["serial_no", "host", "device", "model", "capacity", "_field"])
   |> last()
+  |> map(fn: (r) => { m = devLookup(field: r._field)
+      return {r with _field: m.col, _value: float(v: r._value) * m.scale + m.offset} })
+  |> keep(columns: ["serial_no", "host", "device", "model", "capacity", "_field", "_value"])
   |> group()
-  |> keep(columns: ["serial_no", "host", "device", "model", "capacity", "_value"])
+  |> pivot(rowKey: ["serial_no", "host", "device", "model", "capacity"],
+           columnKey: ["_field"], valueColumn: "_value")
 
 join(tables: {d: devs, a: attrs}, on: ["serial_no", "host"])
   |> group()
